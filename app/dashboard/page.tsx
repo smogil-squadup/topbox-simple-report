@@ -236,10 +236,41 @@ export default function Home() {
           {/* Filter Actions */}
           <div className="mt-4 flex gap-2 justify-end">
             <button
-              onClick={() => {
+              onClick={async () => {
                 setSearchQuery("");
                 setDateFrom("");
                 setDateTo("");
+
+                // Reload data without filters
+                setIsLoading(true);
+                setResults([]);
+                setFilteredResults([]);
+                toast.loading("Clearing filters...", { id: "clear" });
+
+                try {
+                  const response = await fetch("/api/seat-lookup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                  });
+
+                  const data = await response.json();
+
+                  if (!response.ok) {
+                    throw new Error(data.error || "Failed to load report");
+                  }
+
+                  setResults(data.results || []);
+                  setFilteredResults(data.results || []);
+
+                  toast.dismiss("clear");
+                  toast.success("Filters cleared");
+                } catch (error) {
+                  toast.dismiss("clear");
+                  toast.error(error instanceof Error ? error.message : "Failed to clear filters");
+                } finally {
+                  setIsLoading(false);
+                }
               }}
               disabled={isLoading}
               className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors">
