@@ -1,4 +1,4 @@
-import { task } from "@trigger.dev/sdk/v3";
+import { schedules } from "@trigger.dev/sdk/v3";
 import { Pool } from "pg";
 import { Resend } from "resend";
 
@@ -44,10 +44,10 @@ function generateCSV(results: EventListResult[]): string {
   return csv;
 }
 
-export const dailyEventReport = task({
+export const dailyEventReport = schedules.task({
   id: "daily-event-report",
-  // Run this job on a schedule (every day at 9 AM)
-  run: async (payload: { scheduledReportId?: string }, { ctx }) => {
+  // Schedule will be managed dynamically via the UI
+  run: async (payload, { ctx }) => {
     console.log("Starting daily event report job", { payload });
 
     // Connect to Supabase to get recipients

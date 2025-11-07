@@ -21,8 +21,8 @@ interface ScheduledReport {
 
 // US Timezone mappings
 const US_TIMEZONES = [
-  { value: "America/Chicago", label: "Central Time (Texas)", offset: "UTC-6/-5" },
   { value: "America/New_York", label: "Eastern Time", offset: "UTC-5/-4" },
+  { value: "America/Chicago", label: "Central Time (Texas)", offset: "UTC-6/-5" },
   { value: "America/Denver", label: "Mountain Time", offset: "UTC-7/-6" },
   { value: "America/Los_Angeles", label: "Pacific Time", offset: "UTC-8/-7" },
   { value: "America/Phoenix", label: "Arizona Time", offset: "UTC-7" },
@@ -35,12 +35,39 @@ export default function SchedulePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ScheduledReport | null>(null);
 
-  // Schedule settings
-  const [hour, setHour] = useState(9);
+  // Schedule settings - using 12-hour format
+  const [hour12, setHour12] = useState(9); // 1-12
   const [minute, setMinute] = useState(0);
-  const [timezone, setTimezone] = useState("America/Chicago");
+  const [period, setPeriod] = useState<"AM" | "PM">("AM");
+  const [timezone, setTimezone] = useState("America/New_York"); // Default to EST
   const [isActive, setIsActive] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Convert 12-hour to 24-hour
+  const get24Hour = () => {
+    if (period === "AM") {
+      return hour12 === 12 ? 0 : hour12;
+    } else {
+      return hour12 === 12 ? 12 : hour12 + 12;
+    }
+  };
+
+  // Convert 24-hour to 12-hour
+  const set24Hour = (hour24: number) => {
+    if (hour24 === 0) {
+      setHour12(12);
+      setPeriod("AM");
+    } else if (hour24 < 12) {
+      setHour12(hour24);
+      setPeriod("AM");
+    } else if (hour24 === 12) {
+      setHour12(12);
+      setPeriod("PM");
+    } else {
+      setHour12(hour24 - 12);
+      setPeriod("PM");
+    }
+  };
 
   // Load reports
   const loadReports = async () => {
@@ -62,11 +89,31 @@ export default function SchedulePage() {
         const defaultReport = data.reports[0];
         setSelectedReport(defaultReport);
 
-        // Parse cron expression (format: "minute hour * * *")
+        // Parse cron expression (format: "minute hour * * *" in UTC)
         const cronParts = defaultReport.cron_expression.split(" ");
         if (cronParts.length >= 2) {
-          setMinute(parseInt(cronParts[0]) || 0);
-          setHour(parseInt(cronParts[1]) || 9);
+          const utcMinute = parseInt(cronParts[0]) || 0;
+          const utcHour = parseInt(cronParts[1]) || 9;
+
+          // Convert UTC time back to user's timezone
+          // Create a date in UTC with the cron time
+          const utcDate = new Date();
+          utcDate.setUTCHours(utcHour, utcMinute, 0, 0);
+
+          // Convert to the saved timezone
+          const localTimeStr = utcDate.toLocaleString("en-US", {
+            timeZone: timezone,
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+
+          const [localHourStr, localMinStr] = localTimeStr.split(":");
+          const localHour = parseInt(localHourStr);
+          const localMin = parseInt(localMinStr);
+
+          set24Hour(localHour);
+          setMinute(localMin);
         }
 
         setIsActive(defaultReport.is_active);
@@ -93,28 +140,40 @@ export default function SchedulePage() {
     toast.loading("Updating schedule...", { id: "save" });
 
     try {
-      // Convert local time to UTC for cron
-      // Cron runs in UTC, so we need to convert the user's selected time
-      const date = new Date();
-      date.setHours(hour, minute, 0, 0);
+      // Get 24-hour format
+      const hour24 = get24Hour();
 
-      // Get timezone offset
-      const tzDate = new Date(date.toLocaleString("en-US", { timeZone: timezone }));
-      const utcDate = new Date(date.toLocaleString("en-US", { timeZone: "UTC" }));
-      const offsetMs = utcDate.getTime() - tzDate.getTime();
+      // Create a date object with the user's selected time in their timezone
+      const now = new Date();
+      const localDateStr = now.toLocaleDateString("en-US", { timeZone: timezone });
+      const userTime = new Date(`${localDateStr} ${hour24.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}:00`);
 
-      // Apply offset to get UTC time
-      const utcTime = new Date(date.getTime() + offsetMs);
-      const utcHour = utcTime.getUTCHours();
-      const utcMinute = utcTime.getUTCMinutes();
+      // Get the UTC equivalent
+      const utcTimeStr = userTime.toLocaleString("en-US", {
+        timeZone: "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+
+      const [utcHourStr, utcMinStr] = utcTimeStr.split(":");
+      const utcHour = parseInt(utcHourStr);
+      const utcMinute = parseInt(utcMinStr);
 
       // Build cron expression (minute hour * * *)
       const cronExpression = `${utcMinute} ${utcHour} * * *`;
 
       // Build human-readable description
-      const timeStr = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+      const timeStr = `${hour12}:${minute.toString().padStart(2, "0")} ${period}`;
       const tzLabel = US_TIMEZONES.find((tz) => tz.value === timezone)?.label || timezone;
       const scheduleDescription = `Every day at ${timeStr} ${tzLabel}`;
+
+      console.log("Saving schedule:", {
+        userTime: `${hour12}:${minute.toString().padStart(2, "0")} ${period}`,
+        timezone,
+        cronExpression,
+        utcTime: `${utcHour}:${utcMinute} UTC`,
+      });
 
       const response = await fetch("/api/scheduled-reports", {
         method: "PUT",
@@ -133,6 +192,35 @@ export default function SchedulePage() {
         throw new Error(data.error || "Failed to update schedule");
       }
 
+      // Create/update Trigger.dev schedule
+      try {
+        const triggerResponse = await fetch("/api/trigger-schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cron: cronExpression,
+            timezone: timezone,
+            isActive: isActive,
+          }),
+        });
+
+        const triggerData = await triggerResponse.json();
+
+        if (!triggerResponse.ok) {
+          console.error("Failed to update Trigger.dev schedule:", triggerData);
+          toast.dismiss("save");
+          toast.error("Schedule saved but Trigger.dev sync failed");
+          return;
+        }
+
+        console.log("Trigger.dev schedule updated:", triggerData);
+      } catch (triggerError) {
+        console.error("Error syncing with Trigger.dev:", triggerError);
+        toast.dismiss("save");
+        toast.error("Schedule saved but Trigger.dev sync failed");
+        return;
+      }
+
       toast.dismiss("save");
       toast.success("Schedule updated successfully");
       loadReports();
@@ -147,6 +235,7 @@ export default function SchedulePage() {
   // Load reports on mount
   useEffect(() => {
     loadReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const getStatusIcon = (status: string | null) => {
@@ -205,32 +294,49 @@ export default function SchedulePage() {
             <h2 className="text-xl font-semibold mb-4">Schedule Settings</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Time Selection */}
+              {/* Time Selection - 12 Hour Format */}
               <div>
                 <label className="block text-sm font-medium mb-2">Delivery Time</label>
                 <div className="flex gap-2">
+                  {/* Hour (1-12) */}
                   <select
-                    value={hour}
-                    onChange={(e) => setHour(parseInt(e.target.value))}
+                    value={hour12}
+                    onChange={(e) => setHour12(parseInt(e.target.value))}
                     className="flex-1 p-3 border rounded-md"
                     disabled={isSaving}>
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <option key={i} value={i}>
-                        {i.toString().padStart(2, "0")}:00 {i < 12 ? "AM" : "PM"}
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                      <option key={h} value={h}>
+                        {h}
                       </option>
                     ))}
                   </select>
+
+                  {/* Minute */}
                   <select
                     value={minute}
                     onChange={(e) => setMinute(parseInt(e.target.value))}
+                    className="flex-1 p-3 border rounded-md"
+                    disabled={isSaving}>
+                    {Array.from({ length: 60 }, (_, i) => (
+                      <option key={i} value={i}>
+                        :{i.toString().padStart(2, "0")}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* AM/PM */}
+                  <select
+                    value={period}
+                    onChange={(e) => setPeriod(e.target.value as "AM" | "PM")}
                     className="w-24 p-3 border rounded-md"
                     disabled={isSaving}>
-                    <option value={0}>:00</option>
-                    <option value={15}>:15</option>
-                    <option value={30}>:30</option>
-                    <option value={45}>:45</option>
+                    <option value="AM">AM</option>
+                    <option value="PM">PM</option>
                   </select>
                 </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Selected: {hour12}:{minute.toString().padStart(2, "0")} {period}
+                </p>
               </div>
 
               {/* Timezone Selection */}
@@ -265,7 +371,7 @@ export default function SchedulePage() {
                 </span>
               </label>
               <p className="text-sm text-gray-500 mt-1 ml-8">
-                Reports will be sent daily at the scheduled time
+                Reports will be sent daily at {hour12}:{minute.toString().padStart(2, "0")} {period} {US_TIMEZONES.find(tz => tz.value === timezone)?.label}
               </p>
             </div>
 
@@ -360,10 +466,10 @@ export default function SchedulePage() {
             <div className="flex gap-3">
               <Play className="text-blue-600 flex-shrink-0" size={20} />
               <div className="text-sm">
-                <p className="font-medium text-blue-900 mb-1">Testing in Trigger.dev</p>
+                <p className="font-medium text-blue-900 mb-1">Scheduled Runs in Trigger.dev</p>
                 <p className="text-blue-700">
-                  You can manually test this report anytime from your Trigger.dev dashboard.
-                  Scheduled runs will happen automatically at the time you configure above.
+                  This schedule updates the database. For automatic scheduled runs, you need to create a schedule in your Trigger.dev dashboard
+                  for the "daily-event-report" task using the cron expression stored in the database.
                 </p>
               </div>
             </div>
