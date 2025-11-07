@@ -328,12 +328,21 @@ export const searchPaymentsByNameOrEmail = async (params: {
   }
 };
 
+// Price tier breakdown interface
+export interface PriceTierBreakdown {
+  priceTierId: number;
+  priceTierName: string;
+  payoutAmount: number;
+  ticketsSold: number;
+}
+
 // Event list result interface
 export interface EventListResult {
   eventId: number;
   eventName: string;
   payoutAmount: number;
   ticketsSold: number;
+  priceTiers: PriceTierBreakdown[];
 }
 
 // Get event list report for a specific host user
@@ -342,7 +351,8 @@ export const getEventListReport = async (params: {
   dateFrom?: string;
   dateTo?: string;
 }): Promise<EventListResult[]> => {
-  let queryText = `
+  // First, get the events with aggregated totals
+  let eventsQueryText = `
     SELECT
       e.id AS "eventId",
       e.name AS "eventName",
@@ -381,19 +391,68 @@ export const getEventListReport = async (params: {
   // Add date range filtering based on event start date
   if (params.dateFrom) {
     paramCount++;
-    queryText += ` AND e.start_at::date >= $${paramCount}::date`;
+    eventsQueryText += ` AND e.start_at::date >= $${paramCount}::date`;
     queryParams.push(params.dateFrom);
   }
 
   if (params.dateTo) {
     paramCount++;
-    queryText += ` AND e.start_at::date <= $${paramCount}::date`;
+    eventsQueryText += ` AND e.start_at::date <= $${paramCount}::date`;
     queryParams.push(params.dateTo);
   }
 
-  queryText += `
+  eventsQueryText += `
     ORDER BY
       e.name
+  `;
+
+  // Query to get price tier breakdown for all events
+  // Simplified version that's much faster - uses same payout calculation logic
+  let priceTiersQueryText = `
+    SELECT
+      pt.event_id AS "eventId",
+      pt.id AS "priceTierId",
+      pt.name AS "priceTierName",
+      COALESCE(ROUND(SUM(
+        (pi.quantity::numeric / NULLIF(payment_totals.total_quantity, 0)) *
+        (p.amount - p.refund_amount - p.guest_processing_fees - p.host_processing_fees -
+         p.guest_squadup_fees - p.host_squadup_fees - p.insurance_premium - p.shipping_fees -
+         p.added_fees_paid)
+      ), 2), 0) AS "payoutAmount",
+      COALESCE(pt.package_quantity, 1) * (pt.quantity_sold - pt.quantity_exchanged_sent) AS "ticketsSold"
+    FROM
+      price_tiers pt
+    LEFT JOIN payment_items pi ON pi.price_tier_id = pt.id
+    LEFT JOIN payments p ON p.id = pi.payment_id
+      AND p.status NOT IN ('void', 'refund', 'cancel', 'transfer')
+      AND (p.payment_plan_in_progress IS NULL OR p.payment_plan_in_progress = false)
+      AND (p.payment_instrument != 'check_wire' OR (p.payment_instrument = 'check_wire' AND p.check_wire_paid_at IS NOT NULL))
+    LEFT JOIN (
+      SELECT payment_id, SUM(quantity) as total_quantity
+      FROM payment_items
+      GROUP BY payment_id
+    ) payment_totals ON payment_totals.payment_id = p.id
+    WHERE pt.event_id IN (
+      SELECT e.id FROM events e WHERE e.user_id = $1
+  `;
+
+  // Add same date filters for price tiers query subquery
+  paramCount = 1;
+  if (params.dateFrom) {
+    paramCount++;
+    priceTiersQueryText += ` AND e.start_at::date >= $${paramCount}::date`;
+  }
+
+  if (params.dateTo) {
+    paramCount++;
+    priceTiersQueryText += ` AND e.start_at::date <= $${paramCount}::date`;
+  }
+
+  priceTiersQueryText += `
+    )
+    GROUP BY pt.event_id, pt.id, pt.name, pt.package_quantity, pt.quantity_sold, pt.quantity_exchanged_sent
+    ORDER BY
+      pt.event_id, pt.name
   `;
 
   console.log('Executing event list report query:', {
@@ -403,24 +462,53 @@ export const getEventListReport = async (params: {
   });
 
   try {
-    const rows = await query<{
-      eventId: number;
-      eventName: string;
-      payoutAmount: number;
-      ticketsSold: number;
-    }>(queryText, queryParams);
+    // Execute both queries
+    const [eventsRows, priceTiersRows] = await Promise.all([
+      query<{
+        eventId: number;
+        eventName: string;
+        payoutAmount: number;
+        ticketsSold: number;
+      }>(eventsQueryText, queryParams),
+      query<{
+        eventId: number;
+        priceTierId: number;
+        priceTierName: string;
+        payoutAmount: number;
+        ticketsSold: number;
+      }>(priceTiersQueryText, queryParams),
+    ]);
 
-    console.log('Event list report returned rows:', rows.length);
+    console.log('Event list report returned rows:', eventsRows.length);
+    console.log('Price tiers returned rows:', priceTiersRows.length);
 
-    return rows.map((row) => ({
+    // Group price tiers by event ID
+    const priceTiersByEvent = new Map<number, PriceTierBreakdown[]>();
+    for (const tier of priceTiersRows) {
+      const eventId = Number(tier.eventId);
+      if (!priceTiersByEvent.has(eventId)) {
+        priceTiersByEvent.set(eventId, []);
+      }
+      priceTiersByEvent.get(eventId)!.push({
+        priceTierId: Number(tier.priceTierId),
+        priceTierName: tier.priceTierName,
+        payoutAmount: Number(tier.payoutAmount),
+        ticketsSold: Number(tier.ticketsSold),
+      });
+    }
+
+    // Combine events with their price tiers
+    return eventsRows.map((row) => ({
       eventId: Number(row.eventId),
       eventName: row.eventName,
       payoutAmount: Number(row.payoutAmount),
       ticketsSold: Number(row.ticketsSold),
+      priceTiers: priceTiersByEvent.get(Number(row.eventId)) || [],
     }));
   } catch (error) {
     console.error('Event list report query failed:', error);
-    console.error('Query was:', queryText);
+    console.error('Events query was:', eventsQueryText);
+    console.error('Price tiers query was:', priceTiersQueryText);
     console.error('Parameters were:', queryParams);
     throw error;
   }

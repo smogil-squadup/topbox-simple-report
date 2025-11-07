@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import toast, { Toaster } from "react-hot-toast";
-import { Loader2, RefreshCw, Mail, Search, Calendar as CalendarIcon } from "lucide-react";
+import { Loader2, RefreshCw, Mail, Search, Calendar as CalendarIcon, ChevronDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,12 +11,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+
+interface PriceTierBreakdown {
+  priceTierId: number;
+  priceTierName: string;
+  payoutAmount: number;
+  ticketsSold: number;
+}
 
 interface EventListResult {
   eventId: number;
   eventName: string;
   payoutAmount: number;
   ticketsSold: number;
+  priceTiers: PriceTierBreakdown[];
 }
 
 export default function Home() {
@@ -379,26 +393,78 @@ export default function Home() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredResults.map((event, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      <a
-                        href={`https://squadup.com/${event.eventId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
-                        {event.eventId}
-                      </a>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      {event.eventName}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-right font-medium text-gray-900">
-                      ${event.payoutAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-right text-gray-900">
-                      {event.ticketsSold.toLocaleString()}
-                    </td>
-                  </tr>
+                  <React.Fragment key={`event-${event.eventId}`}>
+                    <tr className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        <a
+                          href={`https://squadup.com/${event.eventId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                          {event.eventId}
+                        </a>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        {event.eventName}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-right font-medium text-gray-900">
+                        ${event.payoutAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-right text-gray-900">
+                        {event.ticketsSold.toLocaleString()}
+                      </td>
+                    </tr>
+                    {event.priceTiers.length > 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-6 py-0 bg-gray-50">
+                          <Accordion type="single" collapsible className="w-full">
+                            <AccordionItem value={`price-tiers-${idx}`} className="border-none">
+                              <AccordionTrigger className="hover:no-underline py-3 text-sm text-gray-700">
+                                <span className="flex items-center gap-2">
+                                  <ChevronDown className="h-4 w-4" />
+                                  View Price Tier Breakdown ({event.priceTiers.length} tiers)
+                                </span>
+                              </AccordionTrigger>
+                              <AccordionContent className="pb-4">
+                                <div className="bg-white rounded-md border overflow-hidden">
+                                  <table className="w-full">
+                                    <thead className="bg-gray-100">
+                                      <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                          Price Tier Name
+                                        </th>
+                                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                          Payout Amount
+                                        </th>
+                                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                          Tickets Sold
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200">
+                                      {event.priceTiers.map((tier, tierIdx) => (
+                                        <tr key={tierIdx} className="hover:bg-gray-50">
+                                          <td className="px-6 py-3 text-sm text-gray-900">
+                                            {tier.priceTierName}
+                                          </td>
+                                          <td className="px-6 py-3 text-sm text-right font-medium text-gray-900">
+                                            ${tier.payoutAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </td>
+                                          <td className="px-6 py-3 text-sm text-right text-gray-900">
+                                            {tier.ticketsSold.toLocaleString()}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
               <tfoot className="bg-gray-50 border-t-2 border-gray-300">

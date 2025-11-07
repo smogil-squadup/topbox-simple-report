@@ -2,11 +2,19 @@ import { schedules } from "@trigger.dev/sdk/v3";
 import { Pool } from "pg";
 import { Resend } from "resend";
 
+interface PriceTierBreakdown {
+  priceTierId: number;
+  priceTierName: string;
+  payoutAmount: number;
+  ticketsSold: number;
+}
+
 interface EventListResult {
   eventId: number;
   eventName: string;
   payoutAmount: number;
   ticketsSold: number;
+  priceTiers: PriceTierBreakdown[];
 }
 
 interface Recipient {
@@ -20,7 +28,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // Helper function to generate CSV content
 function generateCSV(results: EventListResult[]): string {
   // CSV Header
-  let csv = "Event ID,Event Name,Payout Amount,Tickets Sold\n";
+  let csv = "Event ID,Event Name,Price Tier Name,Payout Amount,Tickets Sold\n";
 
   // Data rows
   results.forEach((event) => {
@@ -29,17 +37,30 @@ function generateCSV(results: EventListResult[]): string {
       ? `"${event.eventName.replace(/"/g, '""')}"`
       : event.eventName;
 
-    // Convert to numbers to handle database string/decimal types
-    const payoutAmount = Number(event.payoutAmount);
-    const ticketsSold = Number(event.ticketsSold);
+    // If event has price tiers, create a row for each tier
+    if (event.priceTiers.length > 0) {
+      event.priceTiers.forEach((tier) => {
+        const escapedTierName = tier.priceTierName.includes(",")
+          ? `"${tier.priceTierName.replace(/"/g, '""')}"`
+          : tier.priceTierName;
 
-    csv += `${event.eventId},${escapedName},${payoutAmount.toFixed(2)},${ticketsSold}\n`;
+        const payoutAmount = Number(tier.payoutAmount);
+        const ticketsSold = Number(tier.ticketsSold);
+
+        csv += `${event.eventId},${escapedName},${escapedTierName},${payoutAmount.toFixed(2)},${ticketsSold}\n`;
+      });
+    } else {
+      // If no price tiers, show event-level totals
+      const payoutAmount = Number(event.payoutAmount);
+      const ticketsSold = Number(event.ticketsSold);
+      csv += `${event.eventId},${escapedName},"(No Price Tiers)",${payoutAmount.toFixed(2)},${ticketsSold}\n`;
+    }
   });
 
   // Totals row
   const totalPayout = results.reduce((sum, e) => sum + Number(e.payoutAmount), 0);
   const totalTickets = results.reduce((sum, e) => sum + Number(e.ticketsSold), 0);
-  csv += `\nTotal,,${totalPayout.toFixed(2)},${totalTickets}\n`;
+  csv += `\nTotal,,,${totalPayout.toFixed(2)},${totalTickets}\n`;
 
   return csv;
 }
@@ -118,7 +139,12 @@ export const dailyEventReport = schedules.task({
 
       // 3. Fetch event list report data
       // Using the same query from getEventListReport in lib/db.ts
-      const eventsResult = await crunchyPool.query<EventListResult>(`
+      const eventsResult = await crunchyPool.query<{
+        eventId: number;
+        eventName: string;
+        payoutAmount: number;
+        ticketsSold: number;
+      }>(`
         SELECT
           e.id AS "eventId",
           e.name AS "eventName",
@@ -153,8 +179,70 @@ export const dailyEventReport = schedules.task({
           e.name
       `);
 
-      const events = eventsResult.rows;
-      console.log(`Found ${events.length} events`);
+      // Fetch price tier breakdown (optimized query)
+      const priceTiersResult = await crunchyPool.query<{
+        eventId: number;
+        priceTierId: number;
+        priceTierName: string;
+        payoutAmount: number;
+        ticketsSold: number;
+      }>(`
+        SELECT
+          pt.event_id AS "eventId",
+          pt.id AS "priceTierId",
+          pt.name AS "priceTierName",
+          COALESCE(ROUND(SUM(
+            (pi.quantity::numeric / NULLIF(payment_totals.total_quantity, 0)) *
+            (p.amount - p.refund_amount - p.guest_processing_fees - p.host_processing_fees -
+             p.guest_squadup_fees - p.host_squadup_fees - p.insurance_premium - p.shipping_fees -
+             p.added_fees_paid)
+          ), 2), 0) AS "payoutAmount",
+          COALESCE(pt.package_quantity, 1) * (pt.quantity_sold - pt.quantity_exchanged_sent) AS "ticketsSold"
+        FROM
+          price_tiers pt
+        LEFT JOIN payment_items pi ON pi.price_tier_id = pt.id
+        LEFT JOIN payments p ON p.id = pi.payment_id
+          AND p.status NOT IN ('void', 'refund', 'cancel', 'transfer')
+          AND (p.payment_plan_in_progress IS NULL OR p.payment_plan_in_progress = false)
+          AND (p.payment_instrument != 'check_wire' OR (p.payment_instrument = 'check_wire' AND p.check_wire_paid_at IS NOT NULL))
+        LEFT JOIN (
+          SELECT payment_id, SUM(quantity) as total_quantity
+          FROM payment_items
+          GROUP BY payment_id
+        ) payment_totals ON payment_totals.payment_id = p.id
+        WHERE pt.event_id IN (
+          SELECT id FROM events WHERE user_id = 10111198
+        )
+        GROUP BY pt.event_id, pt.id, pt.name, pt.package_quantity, pt.quantity_sold, pt.quantity_exchanged_sent
+        ORDER BY
+          pt.event_id, pt.name
+      `);
+
+      // Group price tiers by event ID
+      const priceTiersByEvent = new Map<number, PriceTierBreakdown[]>();
+      for (const tier of priceTiersResult.rows) {
+        const eventId = Number(tier.eventId);
+        if (!priceTiersByEvent.has(eventId)) {
+          priceTiersByEvent.set(eventId, []);
+        }
+        priceTiersByEvent.get(eventId)!.push({
+          priceTierId: Number(tier.priceTierId),
+          priceTierName: tier.priceTierName,
+          payoutAmount: Number(tier.payoutAmount),
+          ticketsSold: Number(tier.ticketsSold),
+        });
+      }
+
+      // Combine events with their price tiers
+      const events: EventListResult[] = eventsResult.rows.map((row) => ({
+        eventId: Number(row.eventId),
+        eventName: row.eventName,
+        payoutAmount: Number(row.payoutAmount),
+        ticketsSold: Number(row.ticketsSold),
+        priceTiers: priceTiersByEvent.get(Number(row.eventId)) || [],
+      }));
+
+      console.log(`Found ${events.length} events with price tier data`);
 
       // 4. Send email to each recipient
       const emailsSent: string[] = [];
