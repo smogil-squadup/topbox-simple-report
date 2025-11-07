@@ -4,10 +4,11 @@ import { Pool, PoolConfig } from 'pg';
 let pool: Pool | null = null;
 
 const getPoolConfig = (): PoolConfig => {
-  // Use DATABASE_URL if available, otherwise use individual env vars
-  if (process.env.DATABASE_URL) {
+  // Use CRUNCHYBRIDGE_DATABASE_URL for event/payment data (read-only)
+  // This database contains events, payments, price_tiers, etc.
+  if (process.env.CRUNCHYBRIDGE_DATABASE_URL) {
     return {
-      connectionString: process.env.DATABASE_URL,
+      connectionString: process.env.CRUNCHYBRIDGE_DATABASE_URL,
       ssl: { rejectUnauthorized: false }, // CrunchyBridge requires SSL
       max: parseInt(process.env.DB_MAX_CONNECTIONS || '10'),
       idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '10000'),
