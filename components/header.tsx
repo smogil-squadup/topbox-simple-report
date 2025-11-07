@@ -37,6 +37,15 @@ export default function Header() {
               }`}>
               Recipients
             </Link>
+            <Link
+              href="/dashboard/schedule"
+              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                pathname === "/dashboard/schedule"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-700 hover:bg-gray-200"
+              }`}>
+              Schedule
+            </Link>
           </nav>
         </SignedIn>
       </div>
