@@ -84,17 +84,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await pool.query<Recipient>(
-      `INSERT INTO report_recipients (email, name, organization_id, is_active)
-       VALUES ($1, $2, $3, true)
-       RETURNING id, email, name, organization_id, is_active, created_at, updated_at`,
-      [email, name || null, organization_id || null]
-    );
+    // Start a transaction to insert into both tables
+    await pool.query("BEGIN");
 
-    return NextResponse.json({
-      recipient: result.rows[0],
-      message: "Recipient created successfully",
-    });
+    try {
+      // 1. Insert into report_recipients
+      const result = await pool.query<Recipient>(
+        `INSERT INTO report_recipients (email, name, organization_id, is_active)
+         VALUES ($1, $2, $3, true)
+         RETURNING id, email, name, organization_id, is_active, created_at, updated_at`,
+        [email, name || null, organization_id || null]
+      );
+
+      const newRecipient = result.rows[0];
+
+      // 2. Automatically add to all active scheduled reports
+      const associationResult = await pool.query(
+        `INSERT INTO scheduled_report_recipients (scheduled_report_id, recipient_id)
+         SELECT sr.id, $1
+         FROM scheduled_reports sr
+         WHERE sr.is_active = true
+         ON CONFLICT (scheduled_report_id, recipient_id) DO NOTHING
+         RETURNING scheduled_report_id`,
+        [newRecipient.id]
+      );
+
+      await pool.query("COMMIT");
+
+      return NextResponse.json({
+        recipient: newRecipient,
+        message: "Recipient created successfully",
+        addedToReports: associationResult.rows.length,
+      });
+    } catch (innerError) {
+      await pool.query("ROLLBACK");
+      throw innerError;
+    }
   } catch (error: unknown) {
     console.error("Error creating recipient:", error);
 
