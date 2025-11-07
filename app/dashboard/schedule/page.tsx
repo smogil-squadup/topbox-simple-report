@@ -89,31 +89,15 @@ export default function SchedulePage() {
         const defaultReport = data.reports[0];
         setSelectedReport(defaultReport);
 
-        // Parse cron expression (format: "minute hour * * *" in UTC)
+        // Parse cron expression (format: "minute hour * * *" in local timezone)
         const cronParts = defaultReport.cron_expression.split(" ");
         if (cronParts.length >= 2) {
-          const utcMinute = parseInt(cronParts[0]) || 0;
-          const utcHour = parseInt(cronParts[1]) || 9;
+          const localMinute = parseInt(cronParts[0]) || 0;
+          const localHour = parseInt(cronParts[1]) || 9;
 
-          // Convert UTC time back to user's timezone
-          // Create a date in UTC with the cron time
-          const utcDate = new Date();
-          utcDate.setUTCHours(utcHour, utcMinute, 0, 0);
-
-          // Convert to the saved timezone
-          const localTimeStr = utcDate.toLocaleString("en-US", {
-            timeZone: timezone,
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          });
-
-          const [localHourStr, localMinStr] = localTimeStr.split(":");
-          const localHour = parseInt(localHourStr);
-          const localMin = parseInt(localMinStr);
-
+          // Cron is already in local time, just set it directly
           set24Hour(localHour);
-          setMinute(localMin);
+          setMinute(localMinute);
         }
 
         setIsActive(defaultReport.is_active);
@@ -140,28 +124,11 @@ export default function SchedulePage() {
     toast.loading("Updating schedule...", { id: "save" });
 
     try {
-      // Get 24-hour format
+      // Get 24-hour format - this is the LOCAL time in the selected timezone
       const hour24 = get24Hour();
 
-      // Create a date object with the user's selected time in their timezone
-      const now = new Date();
-      const localDateStr = now.toLocaleDateString("en-US", { timeZone: timezone });
-      const userTime = new Date(`${localDateStr} ${hour24.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}:00`);
-
-      // Get the UTC equivalent
-      const utcTimeStr = userTime.toLocaleString("en-US", {
-        timeZone: "UTC",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      });
-
-      const [utcHourStr, utcMinStr] = utcTimeStr.split(":");
-      const utcHour = parseInt(utcHourStr);
-      const utcMinute = parseInt(utcMinStr);
-
-      // Build cron expression (minute hour * * *)
-      const cronExpression = `${utcMinute} ${utcHour} * * *`;
+      // Build cron expression using LOCAL time (Trigger.dev will handle timezone conversion)
+      const cronExpression = `${minute} ${hour24} * * *`;
 
       // Build human-readable description
       const timeStr = `${hour12}:${minute.toString().padStart(2, "0")} ${period}`;
@@ -172,7 +139,7 @@ export default function SchedulePage() {
         userTime: `${hour12}:${minute.toString().padStart(2, "0")} ${period}`,
         timezone,
         cronExpression,
-        utcTime: `${utcHour}:${utcMinute} UTC`,
+        localTime: `${hour24}:${minute} in ${timezone}`,
       });
 
       const response = await fetch("/api/scheduled-reports", {
