@@ -471,7 +471,7 @@ export const getEventListReport = async (params: {
   console.time('totalQuery');
 
   try {
-    // Execute both queries
+    // Execute both queries with explicit typing
     const [eventsRows, priceTiersRows] = await Promise.all([
       query<{
         eventId: number;
@@ -487,11 +487,24 @@ export const getEventListReport = async (params: {
         payoutAmount: number;
         ticketsSold: number;
       }>(priceTiersQueryText, queryParams),
-    ]).then(([events, tiers]) => {
-      console.timeEnd('totalQuery');
-      return [events, tiers];
-    });
+    ]) as [
+      Array<{
+        eventId: number;
+        eventName: string;
+        eventStartDate: string;
+        payoutAmount: number;
+        ticketsSold: number;
+      }>,
+      Array<{
+        eventId: number;
+        priceTierId: number;
+        priceTierName: string;
+        payoutAmount: number;
+        ticketsSold: number;
+      }>
+    ];
 
+    console.timeEnd('totalQuery');
     console.timeEnd('eventsQuery');
     console.timeEnd('priceTiersQuery');
     console.log('Event list report returned rows:', eventsRows.length);
