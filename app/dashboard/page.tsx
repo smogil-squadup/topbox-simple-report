@@ -2,7 +2,15 @@
 
 import { useState, useEffect } from "react";
 import toast, { Toaster } from "react-hot-toast";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Mail } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface EventListResult {
   eventId: number;
@@ -14,6 +22,9 @@ interface EventListResult {
 export default function Home() {
   const [results, setResults] = useState<EventListResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [isSending, setIsSending] = useState(false);
 
   const loadEventReport = async () => {
     setIsLoading(true);
@@ -46,6 +57,40 @@ export default function Home() {
     }
   };
 
+  const handleSendReport = async () => {
+    if (!email.trim()) {
+      toast.error("Please enter an email address");
+      return;
+    }
+
+    setIsSending(true);
+    toast.loading("Sending report...", { id: "send" });
+
+    try {
+      const response = await fetch("/api/send-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send report");
+      }
+
+      toast.dismiss("send");
+      toast.success(`Report sent to ${email}`);
+      setIsDialogOpen(false);
+      setEmail("");
+    } catch (error) {
+      toast.dismiss("send");
+      toast.error(error instanceof Error ? error.message : "Failed to send report");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   // Load report on mount
   useEffect(() => {
     loadEventReport();
@@ -59,27 +104,91 @@ export default function Home() {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-3xl font-bold">Event List Report</h1>
-          <button
-            onClick={loadEventReport}
-            disabled={isLoading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
-            {isLoading ? (
-              <>
-                <Loader2 className="animate-spin" size={18} />
-                Loading...
-              </>
-            ) : (
-              <>
-                <RefreshCw size={18} />
-                Refresh
-              </>
-            )}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setIsDialogOpen(true)}
+              disabled={isLoading || results.length === 0}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              <Mail size={18} />
+              Send Report
+            </button>
+            <button
+              onClick={loadEventReport}
+              disabled={isLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              {isLoading ? (
+                <>
+                  <Loader2 className="animate-spin" size={18} />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={18} />
+                  Refresh
+                </>
+              )}
+            </button>
+          </div>
         </div>
         <p className="text-gray-600">
           Event summary showing payout amounts and ticket sales
         </p>
       </div>
+
+      {/* Send Report Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send Report via Email</DialogTitle>
+            <DialogDescription>
+              Enter an email address to receive the event report as a CSV attachment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <label htmlFor="email" className="block text-sm font-medium mb-2">
+              Email Address
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter email address"
+              className="w-full p-3 border rounded-md"
+              disabled={isSending}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleSendReport();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setIsDialogOpen(false)}
+              disabled={isSending}
+              className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={handleSendReport}
+              disabled={isSending || !email.trim()}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              {isSending ? (
+                <>
+                  <Loader2 className="animate-spin" size={18} />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Mail size={18} />
+                  Send Report
+                </>
+              )}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
         {isLoading && results.length === 0 ? (

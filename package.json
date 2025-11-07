@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.31.3",
+    "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-popover": "^1.1.15",
     "@radix-ui/react-slot": "^1.2.3",
     "@types/papaparse": "^5.3.16",
@@ -27,6 +28,7 @@
     "react-dom": "19.1.0",
     "react-hot-toast": "^2.6.0",
     "recharts": "^3.1.2",
+    "resend": "^6.4.1",
     "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
