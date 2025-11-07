@@ -339,8 +339,10 @@ export interface EventListResult {
 // Get event list report for a specific host user
 export const getEventListReport = async (params: {
   hostUserId: number;
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<EventListResult[]> => {
-  const queryText = `
+  let queryText = `
     SELECT
       e.id AS "eventId",
       e.name AS "eventName",
@@ -370,11 +372,34 @@ export const getEventListReport = async (params: {
     ) tickets_sum ON tickets_sum.event_id = e.id
     WHERE
       e.user_id = $1
+  `;
+
+  const queryParams: unknown[] = [params.hostUserId];
+  let paramCount = 1;
+
+  // Add date range filtering based on event start date
+  if (params.dateFrom) {
+    paramCount++;
+    queryText += ` AND e.start_at::date >= $${paramCount}::date`;
+    queryParams.push(params.dateFrom);
+  }
+
+  if (params.dateTo) {
+    paramCount++;
+    queryText += ` AND e.start_at::date <= $${paramCount}::date`;
+    queryParams.push(params.dateTo);
+  }
+
+  queryText += `
     ORDER BY
       e.name
   `;
 
-  console.log('Executing event list report query for host user:', params.hostUserId);
+  console.log('Executing event list report query:', {
+    hostUserId: params.hostUserId,
+    dateFrom: params.dateFrom,
+    dateTo: params.dateTo
+  });
 
   try {
     const rows = await query<{
@@ -382,7 +407,7 @@ export const getEventListReport = async (params: {
       eventName: string;
       payoutAmount: number;
       ticketsSold: number;
-    }>(queryText, [params.hostUserId]);
+    }>(queryText, queryParams);
 
     console.log('Event list report returned rows:', rows.length);
 
@@ -395,7 +420,7 @@ export const getEventListReport = async (params: {
   } catch (error) {
     console.error('Event list report query failed:', error);
     console.error('Query was:', queryText);
-    console.error('Parameters were:', [params.hostUserId]);
+    console.error('Parameters were:', queryParams);
     throw error;
   }
 };

@@ -6,17 +6,23 @@ const HOST_USER_ID = 10111198;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { hostUserId } = body;
+    const { hostUserId, dateFrom, dateTo } = body;
 
     // Use provided hostUserId or default to HOST_USER_ID
     const targetHostUserId = hostUserId || HOST_USER_ID;
 
-    console.log('Event list report request:', { hostUserId: targetHostUserId });
+    console.log('Event list report request:', {
+      hostUserId: targetHostUserId,
+      dateFrom,
+      dateTo
+    });
 
     // Query the database for event list report for the host user
     console.log('Executing database query...');
     const results = await getEventListReport({
       hostUserId: targetHostUserId,
+      dateFrom,
+      dateTo,
     });
 
     console.log('Query successful, found results:', results.length);
@@ -25,6 +31,8 @@ export async function POST(request: NextRequest) {
       results,
       metadata: {
         hostUserId: targetHostUserId,
+        dateFrom,
+        dateTo,
         total: results.length,
       },
     });

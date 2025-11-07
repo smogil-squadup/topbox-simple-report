@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import toast, { Toaster } from "react-hot-toast";
-import { Loader2, RefreshCw, Mail } from "lucide-react";
+import { Loader2, RefreshCw, Mail, Search, Calendar as CalendarIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,22 +21,39 @@ interface EventListResult {
 
 export default function Home() {
   const [results, setResults] = useState<EventListResult[]>([]);
+  const [filteredResults, setFilteredResults] = useState<EventListResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [isSending, setIsSending] = useState(false);
 
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const loadEventReport = async () => {
     setIsLoading(true);
     setResults([]);
+    setFilteredResults([]);
 
     toast.loading("Loading event report...", { id: "load" });
 
     try {
+      const body: { dateFrom?: string; dateTo?: string } = {};
+
+      if (dateFrom) {
+        body.dateFrom = dateFrom;
+      }
+
+      if (dateTo) {
+        body.dateTo = dateTo;
+      }
+
       const response = await fetch("/api/seat-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -46,6 +63,7 @@ export default function Home() {
       }
 
       setResults(data.results || []);
+      setFilteredResults(data.results || []);
 
       toast.dismiss("load");
       toast.success(`Loaded ${data.results?.length || 0} event(s)`);
@@ -91,9 +109,24 @@ export default function Home() {
     }
   };
 
+  // Filter results by search query
+  useEffect(() => {
+    if (searchQuery.trim() === "") {
+      setFilteredResults(results);
+    } else {
+      const query = searchQuery.toLowerCase();
+      const filtered = results.filter((event) =>
+        event.eventName.toLowerCase().includes(query) ||
+        event.eventId.toString().includes(query)
+      );
+      setFilteredResults(filtered);
+    }
+  }, [searchQuery, results]);
+
   // Load report on mount
   useEffect(() => {
     loadEventReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
@@ -133,6 +166,83 @@ export default function Home() {
         <p className="text-gray-600">
           Event summary showing payout amounts and ticket sales
         </p>
+
+        {/* Filters */}
+        <div className="mt-6 p-4 bg-white border rounded-lg shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Search Filter */}
+            <div className="flex flex-col">
+              <label htmlFor="search" className="text-sm font-medium mb-2">
+                Search Events
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  id="search"
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by event name or ID..."
+                  className="w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Date From Filter */}
+            <div className="flex flex-col">
+              <label htmlFor="dateFrom" className="text-sm font-medium mb-2">
+                Start Date
+              </label>
+              <div className="relative">
+                <CalendarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  id="dateFrom"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Date To Filter */}
+            <div className="flex flex-col">
+              <label htmlFor="dateTo" className="text-sm font-medium mb-2">
+                End Date
+              </label>
+              <div className="relative">
+                <CalendarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  id="dateTo"
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Actions */}
+          <div className="mt-4 flex gap-2 justify-end">
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                setDateFrom("");
+                setDateTo("");
+              }}
+              disabled={isLoading}
+              className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors">
+              Clear Filters
+            </button>
+            <button
+              onClick={loadEventReport}
+              disabled={isLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors">
+              Apply Date Filter
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Send Report Dialog */}
@@ -191,14 +301,16 @@ export default function Home() {
       </Dialog>
 
       <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-        {isLoading && results.length === 0 ? (
+        {isLoading && filteredResults.length === 0 ? (
           <div className="text-center py-12">
             <Loader2 className="animate-spin mx-auto mb-4" size={40} />
             <p className="text-gray-600">Loading event report...</p>
           </div>
-        ) : results.length === 0 ? (
+        ) : filteredResults.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-600">No events found</p>
+            <p className="text-gray-600">
+              {results.length === 0 ? "No events found" : "No events match your search"}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -220,7 +332,7 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {results.map((event, idx) => (
+                {filteredResults.map((event, idx) => (
                   <tr key={idx} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 text-sm text-gray-900">
                       <a
@@ -246,13 +358,13 @@ export default function Home() {
               <tfoot className="bg-gray-50 border-t-2 border-gray-300">
                 <tr>
                   <td className="px-6 py-4 text-sm font-bold text-gray-900" colSpan={2}>
-                    Total
+                    Total ({filteredResults.length} events)
                   </td>
                   <td className="px-6 py-4 text-sm text-right font-bold text-gray-900">
-                    ${results.reduce((sum, e) => sum + e.payoutAmount, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${filteredResults.reduce((sum, e) => sum + e.payoutAmount, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td className="px-6 py-4 text-sm text-right font-bold text-gray-900">
-                    {results.reduce((sum, e) => sum + e.ticketsSold, 0).toLocaleString()}
+                    {filteredResults.reduce((sum, e) => sum + e.ticketsSold, 0).toLocaleString()}
                   </td>
                 </tr>
               </tfoot>
