@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Gotham Seat Lookup",
+  title: "Topbox Reporting",
   description: "Built by SquadUP",
 };
 
@@ -28,8 +28,7 @@ export default function RootLayout({
     <ClerkProvider afterSignInUrl="/" afterSignUpUrl="/">
       <html lang="en">
         <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
+          className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
           <Header />
           {children}
         </body>

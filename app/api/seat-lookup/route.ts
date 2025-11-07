@@ -1,30 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchPaymentsByNameOrEmail } from "@/lib/db";
+import { getEventListReport } from "@/lib/db";
 
-const HOST_USER_ID = 9987142;
+const HOST_USER_ID = 10111198;
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { searchQuery } = body;
+    const { hostUserId } = body;
 
-    console.log('Seat lookup request:', { searchQuery, hostUserId: HOST_USER_ID });
+    // Use provided hostUserId or default to HOST_USER_ID
+    const targetHostUserId = hostUserId || HOST_USER_ID;
 
-    // Validate input
-    if (!searchQuery || typeof searchQuery !== "string") {
-      return NextResponse.json(
-        {
-          error: "Search query is required",
-        },
-        { status: 400 }
-      );
-    }
+    console.log('Event list report request:', { hostUserId: targetHostUserId });
 
-    // Query the database for payments matching the search query for host user 9987142
+    // Query the database for event list report for the host user
     console.log('Executing database query...');
-    const results = await searchPaymentsByNameOrEmail({
-      searchQuery: searchQuery.trim(),
-      hostUserId: HOST_USER_ID,
+    const results = await getEventListReport({
+      hostUserId: targetHostUserId,
     });
 
     console.log('Query successful, found results:', results.length);
@@ -32,13 +24,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       results,
       metadata: {
-        hostUserId: HOST_USER_ID,
-        searchQuery: searchQuery.trim(),
+        hostUserId: targetHostUserId,
         total: results.length,
       },
     });
   } catch (error) {
-    console.error("Seat lookup error details:", error);
+    console.error("Event list report error details:", error);
     console.error("Error stack:", error instanceof Error ? error.stack : 'No stack trace');
 
     // Check if it's a connection error
@@ -56,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "Failed to search for seats",
+        error: "Failed to fetch event list report",
         details:
           process.env.NODE_ENV === "development"
             ? error instanceof Error
