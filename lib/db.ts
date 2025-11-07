@@ -399,7 +399,7 @@ export const getEventListReport = async (params: {
   }
 
   eventsQueryText += `
-    ORDER BY e.start_at DESC, e.name
+    ORDER BY e.start_at ASC, e.name
   `;
 
   // Simplified price tier query - filter EVERYTHING by user_id first
