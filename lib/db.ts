@@ -329,6 +329,7 @@ export const searchPaymentsByNameOrEmail = async (params: {
 
 // Event list result interface
 export interface EventListResult {
+  eventId: number;
   eventName: string;
   payoutAmount: number;
   ticketsSold: number;
@@ -340,25 +341,34 @@ export const getEventListReport = async (params: {
 }): Promise<EventListResult[]> => {
   const queryText = `
     SELECT
+      e.id AS "eventId",
       e.name AS "eventName",
-      COALESCE(ROUND(SUM(
-        p.amount - p.refund_amount - p.guest_processing_fees - p.host_processing_fees -
-        p.guest_squadup_fees - p.host_squadup_fees - p.insurance_premium - p.shipping_fees
-      ), 2), 0) AS "payoutAmount",
-      COALESCE(SUM(COALESCE(pt.package_quantity, 1) * (pt.quantity_sold - pt.quantity_exchanged_sent)), 0) AS "ticketsSold"
+      COALESCE(payout_sum.total_payout, 0) AS "payoutAmount",
+      COALESCE(tickets_sum.total_tickets, 0) AS "ticketsSold"
     FROM
       events e
-    LEFT JOIN
-      price_tiers pt ON pt.event_id = e.id
-    LEFT JOIN
-      payments p ON p.event_id = e.id
-      AND p.status NOT IN ('void', 'refund', 'cancel', 'transfer')
-      AND (p.payment_plan_in_progress IS NULL OR p.payment_plan_in_progress = false)
-      AND (p.payment_instrument != 'check_wire' OR (p.payment_instrument = 'check_wire' AND p.check_wire_paid_at IS NOT NULL))
+    LEFT JOIN (
+      SELECT
+        p.event_id,
+        ROUND(SUM(
+          p.amount - p.refund_amount - p.guest_processing_fees - p.host_processing_fees -
+          p.guest_squadup_fees - p.host_squadup_fees - p.insurance_premium - p.shipping_fees
+        ), 2) as total_payout
+      FROM payments p
+      WHERE p.status NOT IN ('void', 'refund', 'cancel', 'transfer')
+        AND (p.payment_plan_in_progress IS NULL OR p.payment_plan_in_progress = false)
+        AND (p.payment_instrument != 'check_wire' OR (p.payment_instrument = 'check_wire' AND p.check_wire_paid_at IS NOT NULL))
+      GROUP BY p.event_id
+    ) payout_sum ON payout_sum.event_id = e.id
+    LEFT JOIN (
+      SELECT
+        pt.event_id,
+        SUM(COALESCE(pt.package_quantity, 1) * (pt.quantity_sold - pt.quantity_exchanged_sent)) as total_tickets
+      FROM price_tiers pt
+      GROUP BY pt.event_id
+    ) tickets_sum ON tickets_sum.event_id = e.id
     WHERE
       e.user_id = $1
-    GROUP BY
-      e.id, e.name
     ORDER BY
       e.name
   `;
@@ -367,6 +377,7 @@ export const getEventListReport = async (params: {
 
   try {
     const rows = await query<{
+      eventId: number;
       eventName: string;
       payoutAmount: number;
       ticketsSold: number;
@@ -375,6 +386,7 @@ export const getEventListReport = async (params: {
     console.log('Event list report returned rows:', rows.length);
 
     return rows.map((row) => ({
+      eventId: Number(row.eventId),
       eventName: row.eventName,
       payoutAmount: Number(row.payoutAmount),
       ticketsSold: Number(row.ticketsSold),

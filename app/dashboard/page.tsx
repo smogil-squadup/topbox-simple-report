@@ -5,6 +5,7 @@ import toast, { Toaster } from "react-hot-toast";
 import { Loader2, RefreshCw } from "lucide-react";
 
 interface EventListResult {
+  eventId: number;
   eventName: string;
   payoutAmount: number;
   ticketsSold: number;
@@ -96,6 +97,9 @@ export default function Home() {
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">
+                    Event ID
+                  </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">
                     Event Name
                   </th>
                   <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">
@@ -110,6 +114,15 @@ export default function Home() {
                 {results.map((event, idx) => (
                   <tr key={idx} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 text-sm text-gray-900">
+                      <a
+                        href={`https://squadup.com/${event.eventId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                        {event.eventId}
+                      </a>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
                       {event.eventName}
                     </td>
                     <td className="px-6 py-4 text-sm text-right font-medium text-gray-900">
@@ -123,7 +136,7 @@ export default function Home() {
               </tbody>
               <tfoot className="bg-gray-50 border-t-2 border-gray-300">
                 <tr>
-                  <td className="px-6 py-4 text-sm font-bold text-gray-900">
+                  <td className="px-6 py-4 text-sm font-bold text-gray-900" colSpan={2}>
                     Total
                   </td>
                   <td className="px-6 py-4 text-sm text-right font-bold text-gray-900">
