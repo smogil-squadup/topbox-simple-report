@@ -28,6 +28,7 @@ interface PriceTierBreakdown {
 interface EventListResult {
   eventId: number;
   eventName: string;
+  eventStartDate: string;
   payoutAmount: number;
   ticketsSold: number;
   priceTiers: PriceTierBreakdown[];
@@ -381,6 +382,9 @@ export default function Home() {
                     Event ID
                   </th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">
+                    Event Start Date
+                  </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">
                     Event Name
                   </th>
                   <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">
@@ -405,6 +409,13 @@ export default function Home() {
                         </a>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-900">
+                        {new Date(event.eventStartDate).toLocaleDateString('en-US', {
+                          month: '2-digit',
+                          day: '2-digit',
+                          year: 'numeric',
+                        })}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
                         {event.eventName}
                       </td>
                       <td className="px-6 py-4 text-sm text-right font-medium text-gray-900">
@@ -416,7 +427,7 @@ export default function Home() {
                     </tr>
                     {event.priceTiers.length > 0 && (
                       <tr>
-                        <td colSpan={4} className="px-6 py-0 bg-gray-50">
+                        <td colSpan={5} className="px-6 py-0 bg-gray-50">
                           <Accordion type="single" collapsible className="w-full">
                             <AccordionItem value={`price-tiers-${idx}`} className="border-none">
                               <AccordionTrigger className="hover:no-underline py-3 text-sm text-gray-700">
@@ -469,7 +480,7 @@ export default function Home() {
               </tbody>
               <tfoot className="bg-gray-50 border-t-2 border-gray-300">
                 <tr>
-                  <td className="px-6 py-4 text-sm font-bold text-gray-900" colSpan={2}>
+                  <td className="px-6 py-4 text-sm font-bold text-gray-900" colSpan={3}>
                     Total ({filteredResults.length} events)
                   </td>
                   <td className="px-6 py-4 text-sm text-right font-bold text-gray-900">

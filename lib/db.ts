@@ -340,6 +340,7 @@ export interface PriceTierBreakdown {
 export interface EventListResult {
   eventId: number;
   eventName: string;
+  eventStartDate: string;
   payoutAmount: number;
   ticketsSold: number;
   priceTiers: PriceTierBreakdown[];
@@ -356,6 +357,7 @@ export const getEventListReport = async (params: {
     SELECT
       e.id AS "eventId",
       e.name AS "eventName",
+      e.start_at AS "eventStartDate",
       COALESCE(payout_sum.total_payout, 0) AS "payoutAmount",
       COALESCE(tickets_sum.total_tickets, 0) AS "ticketsSold"
     FROM
@@ -467,6 +469,7 @@ export const getEventListReport = async (params: {
       query<{
         eventId: number;
         eventName: string;
+        eventStartDate: string;
         payoutAmount: number;
         ticketsSold: number;
       }>(eventsQueryText, queryParams),
@@ -501,6 +504,7 @@ export const getEventListReport = async (params: {
     return eventsRows.map((row) => ({
       eventId: Number(row.eventId),
       eventName: row.eventName,
+      eventStartDate: row.eventStartDate,
       payoutAmount: Number(row.payoutAmount),
       ticketsSold: Number(row.ticketsSold),
       priceTiers: priceTiersByEvent.get(Number(row.eventId)) || [],

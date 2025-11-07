@@ -12,6 +12,7 @@ interface PriceTierBreakdown {
 interface EventListResult {
   eventId: number;
   eventName: string;
+  eventStartDate: string;
   payoutAmount: number;
   ticketsSold: number;
   priceTiers: PriceTierBreakdown[];
@@ -28,7 +29,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // Helper function to generate CSV content
 function generateCSV(results: EventListResult[]): string {
   // CSV Header
-  let csv = "Event ID,Event Name,Price Tier Name,Payout Amount,Tickets Sold\n";
+  let csv = "Event ID,Event Start Date,Event Name,Price Tier Name,Payout Amount,Tickets Sold\n";
 
   // Data rows
   results.forEach((event) => {
@@ -36,6 +37,13 @@ function generateCSV(results: EventListResult[]): string {
     const escapedName = event.eventName.includes(",")
       ? `"${event.eventName.replace(/"/g, '""')}"`
       : event.eventName;
+
+    // Format date as MM/DD/YYYY
+    const eventDate = new Date(event.eventStartDate).toLocaleDateString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+    });
 
     // If event has price tiers, create a row for each tier
     if (event.priceTiers.length > 0) {
@@ -47,20 +55,20 @@ function generateCSV(results: EventListResult[]): string {
         const payoutAmount = Number(tier.payoutAmount);
         const ticketsSold = Number(tier.ticketsSold);
 
-        csv += `${event.eventId},${escapedName},${escapedTierName},${payoutAmount.toFixed(2)},${ticketsSold}\n`;
+        csv += `${event.eventId},${eventDate},${escapedName},${escapedTierName},${payoutAmount.toFixed(2)},${ticketsSold}\n`;
       });
     } else {
       // If no price tiers, show event-level totals
       const payoutAmount = Number(event.payoutAmount);
       const ticketsSold = Number(event.ticketsSold);
-      csv += `${event.eventId},${escapedName},"(No Price Tiers)",${payoutAmount.toFixed(2)},${ticketsSold}\n`;
+      csv += `${event.eventId},${eventDate},${escapedName},"(No Price Tiers)",${payoutAmount.toFixed(2)},${ticketsSold}\n`;
     }
   });
 
   // Totals row
   const totalPayout = results.reduce((sum, e) => sum + Number(e.payoutAmount), 0);
   const totalTickets = results.reduce((sum, e) => sum + Number(e.ticketsSold), 0);
-  csv += `\nTotal,,,${totalPayout.toFixed(2)},${totalTickets}\n`;
+  csv += `\nTotal,,,,${totalPayout.toFixed(2)},${totalTickets}\n`;
 
   return csv;
 }
@@ -142,12 +150,14 @@ export const dailyEventReport = schedules.task({
       const eventsResult = await crunchyPool.query<{
         eventId: number;
         eventName: string;
+        eventStartDate: string;
         payoutAmount: number;
         ticketsSold: number;
       }>(`
         SELECT
           e.id AS "eventId",
           e.name AS "eventName",
+          e.start_at AS "eventStartDate",
           COALESCE(payout_sum.total_payout, 0) AS "payoutAmount",
           COALESCE(tickets_sum.total_tickets, 0) AS "ticketsSold"
         FROM
@@ -237,6 +247,7 @@ export const dailyEventReport = schedules.task({
       const events: EventListResult[] = eventsResult.rows.map((row) => ({
         eventId: Number(row.eventId),
         eventName: row.eventName,
+        eventStartDate: row.eventStartDate,
         payoutAmount: Number(row.payoutAmount),
         ticketsSold: Number(row.ticketsSold),
         priceTiers: priceTiersByEvent.get(Number(row.eventId)) || [],
