@@ -436,7 +436,7 @@ export default function SchedulePage() {
                 <p className="font-medium text-blue-900 mb-1">Scheduled Runs in Trigger.dev</p>
                 <p className="text-blue-700">
                   This schedule updates the database. For automatic scheduled runs, you need to create a schedule in your Trigger.dev dashboard
-                  for the "daily-event-report" task using the cron expression stored in the database.
+                  for the &quot;daily-event-report&quot; task using the cron expression stored in the database.
                 </p>
               </div>
             </div>
