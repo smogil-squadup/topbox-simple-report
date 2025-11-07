@@ -113,8 +113,9 @@ export interface PaymentResult {
 export const searchPayments = async (params: PaymentSearchParams): Promise<PaymentResult[]> => {
   // Note: Explicitly list columns to avoid FDW column mismatch issues
   // The FDW may have columns that don't exist in the remote table
+  // Optimized: Filter by host_user_id first (most selective filter) to use index
   let queryText = `
-    SELECT 
+    SELECT
       p.id,
       p.transaction_id,
       p.status,
@@ -129,13 +130,13 @@ export const searchPayments = async (params: PaymentSearchParams): Promise<Payme
       p.shipping_address_id,
       p.metadata,
       e.user_id as host_user_id
-    FROM payments_fdw p
-    LEFT JOIN events_fdw e ON p.event_id = e.id
-    WHERE 1=1
+    FROM events_fdw e
+    INNER JOIN payments_fdw p ON p.event_id = e.id
+    WHERE e.user_id = $1
   `;
-  
-  const queryParams: unknown[] = [];
-  let paramCount = 0;
+
+  const queryParams: unknown[] = [params.hostUserId];
+  let paramCount = 1;
 
   if (params.transactionIds && params.transactionIds.length > 0) {
     paramCount++;
@@ -153,12 +154,6 @@ export const searchPayments = async (params: PaymentSearchParams): Promise<Payme
     paramCount++;
     queryText += ` AND p.created_at::date <= $${paramCount}::date`;
     queryParams.push(params.dateTo);
-  }
-
-  if (params.hostUserId) {
-    paramCount++;
-    queryText += ` AND e.user_id = $${paramCount}`;
-    queryParams.push(params.hostUserId);
   }
 
   queryText += ` ORDER BY p.created_at DESC`;
@@ -352,7 +347,7 @@ export const getEventListReport = async (params: {
   dateFrom?: string;
   dateTo?: string;
 }): Promise<EventListResult[]> => {
-  // First, get the events with aggregated totals
+  // Optimized: Use subqueries to avoid duplicating payments across price_tiers
   let eventsQueryText = `
     SELECT
       e.id AS "eventId",
@@ -360,8 +355,7 @@ export const getEventListReport = async (params: {
       e.start_at AS "eventStartDate",
       COALESCE(payout_sum.total_payout, 0) AS "payoutAmount",
       COALESCE(tickets_sum.total_tickets, 0) AS "ticketsSold"
-    FROM
-      events e
+    FROM events e
     LEFT JOIN (
       SELECT
         p.event_id,
@@ -371,6 +365,7 @@ export const getEventListReport = async (params: {
           p.added_fees_paid
         ), 2) as total_payout
       FROM payments p
+      INNER JOIN events e2 ON p.event_id = e2.id AND e2.user_id = $1
       WHERE p.status NOT IN ('void', 'refund', 'cancel', 'transfer')
         AND (p.payment_plan_in_progress IS NULL OR p.payment_plan_in_progress = false)
         AND (p.payment_instrument != 'check_wire' OR (p.payment_instrument = 'check_wire' AND p.check_wire_paid_at IS NOT NULL))
@@ -381,10 +376,10 @@ export const getEventListReport = async (params: {
         pt.event_id,
         SUM(COALESCE(pt.package_quantity, 1) * (pt.quantity_sold - pt.quantity_exchanged_sent)) as total_tickets
       FROM price_tiers pt
+      INNER JOIN events e3 ON pt.event_id = e3.id AND e3.user_id = $1
       GROUP BY pt.event_id
     ) tickets_sum ON tickets_sum.event_id = e.id
-    WHERE
-      e.user_id = $1
+    WHERE e.user_id = $1
   `;
 
   const queryParams: unknown[] = [params.hostUserId];
@@ -404,12 +399,10 @@ export const getEventListReport = async (params: {
   }
 
   eventsQueryText += `
-    ORDER BY
-      e.name
+    ORDER BY e.start_at DESC, e.name
   `;
 
-  // Query to get price tier breakdown for all events
-  // Simplified version that's much faster - uses same payout calculation logic
+  // Simplified price tier query - filter EVERYTHING by user_id first
   let priceTiersQueryText = `
     SELECT
       pt.event_id AS "eventId",
@@ -422,23 +415,27 @@ export const getEventListReport = async (params: {
          p.added_fees_paid)
       ), 2), 0) AS "payoutAmount",
       COALESCE(pt.package_quantity, 1) * (pt.quantity_sold - pt.quantity_exchanged_sent) AS "ticketsSold"
-    FROM
-      price_tiers pt
+    FROM price_tiers pt
+    INNER JOIN events e ON e.id = pt.event_id
     LEFT JOIN payment_items pi ON pi.price_tier_id = pt.id
     LEFT JOIN payments p ON p.id = pi.payment_id
       AND p.status NOT IN ('void', 'refund', 'cancel', 'transfer')
       AND (p.payment_plan_in_progress IS NULL OR p.payment_plan_in_progress = false)
       AND (p.payment_instrument != 'check_wire' OR (p.payment_instrument = 'check_wire' AND p.check_wire_paid_at IS NOT NULL))
     LEFT JOIN (
-      SELECT payment_id, SUM(quantity) as total_quantity
-      FROM payment_items
-      GROUP BY payment_id
+      SELECT pi2.payment_id, SUM(pi2.quantity) as total_quantity
+      FROM payment_items pi2
+      WHERE pi2.payment_id IN (
+        SELECT p2.id FROM payments p2
+        INNER JOIN events e2 ON p2.event_id = e2.id
+        WHERE e2.user_id = $1
+      )
+      GROUP BY pi2.payment_id
     ) payment_totals ON payment_totals.payment_id = p.id
-    WHERE pt.event_id IN (
-      SELECT e.id FROM events e WHERE e.user_id = $1
+    WHERE e.user_id = $1
   `;
 
-  // Add same date filters for price tiers query subquery
+  // Add same date filters
   paramCount = 1;
   if (params.dateFrom) {
     paramCount++;
@@ -451,10 +448,8 @@ export const getEventListReport = async (params: {
   }
 
   priceTiersQueryText += `
-    )
     GROUP BY pt.event_id, pt.id, pt.name, pt.package_quantity, pt.quantity_sold, pt.quantity_exchanged_sent
-    ORDER BY
-      pt.event_id, pt.name
+    ORDER BY pt.event_id, pt.name
   `;
 
   console.log('Executing event list report query:', {
@@ -462,6 +457,18 @@ export const getEventListReport = async (params: {
     dateFrom: params.dateFrom,
     dateTo: params.dateTo
   });
+
+  console.log('\n=== EVENTS QUERY ===');
+  console.log(eventsQueryText);
+  console.log('Params:', queryParams);
+
+  console.log('\n=== PRICE TIERS QUERY ===');
+  console.log(priceTiersQueryText);
+  console.log('Params:', queryParams);
+
+  console.time('eventsQuery');
+  console.time('priceTiersQuery');
+  console.time('totalQuery');
 
   try {
     // Execute both queries
@@ -480,8 +487,13 @@ export const getEventListReport = async (params: {
         payoutAmount: number;
         ticketsSold: number;
       }>(priceTiersQueryText, queryParams),
-    ]);
+    ]).then(([events, tiers]) => {
+      console.timeEnd('totalQuery');
+      return [events, tiers];
+    });
 
+    console.timeEnd('eventsQuery');
+    console.timeEnd('priceTiersQuery');
     console.log('Event list report returned rows:', eventsRows.length);
     console.log('Price tiers returned rows:', priceTiersRows.length);
 

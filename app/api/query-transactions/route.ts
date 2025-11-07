@@ -79,37 +79,54 @@ export async function POST(request: NextRequest) {
       offset,
     });
 
-    // Fetch ZIP codes from Worldpay API for each transaction
+    // Fetch ZIP codes from Worldpay API in parallel (much faster!)
+    // Process in batches of 10 to avoid overwhelming the API
+    const batchSize = 10;
     const results = [];
     const errors = [];
 
-    for (const payment of payments) {
-      try {
-        const zipCode = await fetchZipFromWorldpay(payment.transaction_id);
+    for (let i = 0; i < payments.length; i += batchSize) {
+      const batch = payments.slice(i, i + batchSize);
 
-        results.push({
-          transactionId: payment.transaction_id,
-          zipCode,
-          createdAt: payment.created_at,
-          amount: payment.amount ? Number(payment.amount) : null,
-          status: payment.status,
-          cardType: payment.card_type,
-          lastFour: payment.last_four,
-          ipAddress: payment.metadata?.ip_address,
-          // Database-specific fields
-          paymentId: payment.id,
-          userId: payment.user_id,
-          eventId: payment.event_id,
-          eventAttendeeId: payment.event_attendee_id,
-        });
+      const batchResults = await Promise.allSettled(
+        batch.map(async (payment) => {
+          const zipCode = await fetchZipFromWorldpay(payment.transaction_id);
+          return {
+            transactionId: payment.transaction_id,
+            zipCode,
+            createdAt: payment.created_at,
+            amount: payment.amount ? Number(payment.amount) : null,
+            status: payment.status,
+            cardType: payment.card_type,
+            lastFour: payment.last_four,
+            ipAddress: payment.metadata?.ip_address,
+            // Database-specific fields
+            paymentId: payment.id,
+            userId: payment.user_id,
+            eventId: payment.event_id,
+            eventAttendeeId: payment.event_attendee_id,
+          };
+        })
+      );
 
-        // Add a small delay to avoid overwhelming the API
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      } catch (error) {
-        errors.push({
-          transactionId: payment.transaction_id,
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
+      // Process batch results
+      for (let j = 0; j < batchResults.length; j++) {
+        const result = batchResults[j];
+        const payment = batch[j];
+
+        if (result.status === "fulfilled") {
+          results.push(result.value);
+        } else {
+          errors.push({
+            transactionId: payment.transaction_id,
+            error: result.reason instanceof Error ? result.reason.message : "Unknown error",
+          });
+        }
+      }
+
+      // Small delay between batches to be respectful to API
+      if (i + batchSize < payments.length) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
 
