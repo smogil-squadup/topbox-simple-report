@@ -131,7 +131,8 @@ export const dailyEventReport = schedules.task({
             p.event_id,
             ROUND(SUM(
               p.amount - p.refund_amount - p.guest_processing_fees - p.host_processing_fees -
-              p.guest_squadup_fees - p.host_squadup_fees - p.insurance_premium - p.shipping_fees
+              p.guest_squadup_fees - p.host_squadup_fees - p.insurance_premium - p.shipping_fees -
+              p.added_fees_paid
             ), 2) as total_payout
           FROM payments p
           WHERE p.status NOT IN ('void', 'refund', 'cancel', 'transfer')
