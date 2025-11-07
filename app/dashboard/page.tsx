@@ -85,10 +85,20 @@ export default function Home() {
     toast.loading("Sending report...", { id: "send" });
 
     try {
+      // Build filter information to include in the email
+      const filters: { searchQuery?: string; dateFrom?: string; dateTo?: string } = {};
+      if (searchQuery) filters.searchQuery = searchQuery;
+      if (dateFrom) filters.dateFrom = dateFrom;
+      if (dateTo) filters.dateTo = dateTo;
+
       const response = await fetch("/api/send-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({
+          email: email.trim(),
+          results: filteredResults, // Send the filtered results
+          filters: Object.keys(filters).length > 0 ? filters : undefined,
+        }),
       });
 
       const data = await response.json();
@@ -140,7 +150,7 @@ export default function Home() {
           <div className="flex gap-2">
             <button
               onClick={() => setIsDialogOpen(true)}
-              disabled={isLoading || results.length === 0}
+              disabled={isLoading || filteredResults.length === 0}
               className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
               <Mail size={18} />
               Send Report
@@ -252,6 +262,11 @@ export default function Home() {
             <DialogTitle>Send Report via Email</DialogTitle>
             <DialogDescription>
               Enter an email address to receive the event report as a CSV attachment.
+              {(searchQuery || dateFrom || dateTo) && (
+                <span className="block mt-2 text-blue-600 font-medium">
+                  Note: The report will include only the {filteredResults.length} filtered event(s) currently displayed.
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">

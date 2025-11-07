@@ -39,7 +39,7 @@ function generateCSV(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, hostUserId } = body;
+    const { email, hostUserId, results: filteredResults, filters } = body;
 
     // Validate email
     if (!email || typeof email !== "string") {
@@ -88,12 +88,23 @@ export async function POST(request: NextRequest) {
 
     const targetHostUserId = hostUserId || HOST_USER_ID;
 
-    console.log("Fetching event report for email:", { email, hostUserId: targetHostUserId });
-
-    // Get the report data
-    const results = await getEventListReport({
+    console.log("Sending filtered event report via email:", {
+      email,
       hostUserId: targetHostUserId,
+      eventCount: filteredResults?.length || 0,
+      filters
     });
+
+    // Use provided filtered results or fetch all data
+    let results;
+    if (filteredResults && Array.isArray(filteredResults) && filteredResults.length > 0) {
+      results = filteredResults;
+    } else {
+      // Fallback to fetching data if no results provided
+      results = await getEventListReport({
+        hostUserId: targetHostUserId,
+      });
+    }
 
     if (results.length === 0) {
       return NextResponse.json(
@@ -117,14 +128,39 @@ export async function POST(request: NextRequest) {
     const today = new Date().toISOString().split("T")[0];
     const filename = `event-report-${targetHostUserId}-${today}.csv`;
 
+    // Build filter description for email
+    let filterDescription = "";
+    if (filters) {
+      const filterParts = [];
+      if (filters.searchQuery) {
+        filterParts.push(`Search: "${filters.searchQuery}"`);
+      }
+      if (filters.dateFrom) {
+        filterParts.push(`From: ${filters.dateFrom}`);
+      }
+      if (filters.dateTo) {
+        filterParts.push(`To: ${filters.dateTo}`);
+      }
+      if (filterParts.length > 0) {
+        filterDescription = `
+          <h3>Applied Filters</h3>
+          <ul>
+            ${filterParts.map(filter => `<li>${filter}</li>`).join('')}
+          </ul>
+        `;
+      }
+    }
+
     // Send email with Resend
     const { data, error } = await resend.emails.send({
       from: process.env.RESEND_FROM_EMAIL,
       to: email,
-      subject: `Event List Report - ${today}`,
+      subject: `Event List Report - ${today}${filters && (filters.searchQuery || filters.dateFrom || filters.dateTo) ? ' (Filtered)' : ''}`,
       html: `
         <h2>Event List Report</h2>
         <p>Please find attached the event list report for host ID ${targetHostUserId}.</p>
+
+        ${filterDescription}
 
         <h3>Summary</h3>
         <ul>
